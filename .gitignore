@@ -1,6 +1,9 @@
 # Created by https://www.toptal.com/developers/gitignore/api/python,pythonvanilla,circuitpython
 # Edit at https://www.toptal.com/developers/gitignore?templates=python,pythonvanilla,circuitpython
 
+# Google drive access
+credentials.json
+
 ### CircuitPython ###
 .Trashes
 .metadata_never_index
