@@ -1,0 +1,36 @@
+"summary_text","time","diff"
+"This CSV data contains **7 records**.
+
+All records are identical:
+*   **Name:** Alice
+*   **Value:** 100
+*   **Timestamp:** 2025-10-23T10:00:00","1761220675910","1"
+"This CSV data contains 9 identical records for **Alice**, each with a **value of 100**, and all recorded at the **timestamp 2025-10-23T10:00:00**.","1761220680834","1"
+"This CSV data contains academic performance records for **104 students**, identified by their Admission Number and Name.
+
+The performance is assessed across several components:
+*   **Quiz 1:** Out of 10 marks
+*   **Normalized Mid-sem:** Out of 30 marks
+*   **Quiz 2:** Out of 10 marks
+*   **End Sem:** Raw score out of 40 marks, and a **Normalized End_Sem** score out of 50 marks.
+
+The **Total** score for each student is calculated out of 100, by summing Quiz 1 (10) + Normalized Mid sem (30) + Quiz 2 (10) + Normalized End_Sem (50).
+
+**Key Observations:**
+
+1.  **Overall Performance:**
+    *   The **highest total score** achieved is **97.50** by Yash Agarwal.
+    *   The **lowest recorded total score** is **0.00**, seen for three students (Sudhanshu Kumar, Boddepalli Govardhan, Utkarsh Raj Bind), which likely indicates non-participation or absence from all assessments. The lowest non-zero score is 38.50 by Rajarshi Chakraborty.
+    *   The overall **Mean Total score** across all students is **72.38**.
+    *   The **Standard Deviation** of the total scores is **16.03**, indicating a fairly wide spread in student performance.
+
+2.  **Top Performers:**
+    *   **Yash Agarwal (97.50)**
+    *   **Akshat Rai (97.38)**
+    *   **Pranavishvar H (95.00)**
+
+3.  **Score Distribution:**
+    *   A significant number of students scored in the 80s and 90s, with 16 students scoring 90 or above.
+    *   The scores generally span the full range, from 0.00 to high 90s, indicating varied performance levels within the group.
+
+The dataset provides a comprehensive look at individual student performance weighted across different assessment components in a course.","1761220858910","1"

@@ -1,6 +1,16 @@
+from dotenv import load_dotenv
+load_dotenv()
+import os
+import requests
+import time
+
+start = time.time()
 import pathway as pw
-import csv
-import io
+end = time.time()
+print(f"Took {end-start} sec to import pathway\nStarting streaming...")
+
+gemini_api_key = os.getenv("GEMINI_API_KEY")
+gemini_endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
 class InputSchema(pw.Schema):
     name: str
@@ -8,71 +18,64 @@ class InputSchema(pw.Schema):
     timestamp: str
 
 gdrive_table = pw.io.gdrive.read(
-    object_id="19DMQzidCyVGkXVUUyJM8j4jtgCSgRr9D",
+    object_id="19DMQzidCyVGkXVUUyJM8j4jtgCSgRr9D", ## Replace this with your Folder ID
     service_user_credentials_file="credentials.json",
     mode="streaming"
 )
 
-pw.io.jsonlines.write(gdrive_table, "gdrive_raw_output.jsonl")
-
-# @pw.udf
-# def parse_csv_to_rows(data: bytes) -> pw.Table[InputSchema]:
-#     """
-#     Parse CSV binary data and return a Pathway table (pw.Table) 
-#     containing all rows from the CSV.
-#     """
-#     try:
-#         csv_text = data.decode('utf-8')
-#         reader = csv.DictReader(io.StringIO(csv_text))
-        
-#         rows = []
-#         for row in reader:
-#             rows.append(InputSchema(
-#                 name=row.get('name', ''),
-#                 value=int(row.get('value', 0)),
-#                 timestamp=row.get('timestamp', '')
-#             ))
-
-#         return pw.Table.from_list(rows)
-    
-#     except Exception as e:
-#         print(f"Parse error: {e}")
-#         return pw.Table.from_list([])
-
-# parsed_table = gdrive_table.flat_map(parse_csv_to_rows)
-
-# result = parsed_table.groupby().reduce(
-#     total=pw.reducers.sum(parsed_table.value),
-#     count=pw.reducers.count()
-# )
-
-# pw.io.jsonlines.write(result, "gdrive_output.jsonl")
-# pw.io.csv.write(result, "gdrive_output.csv")
-
 @pw.udf
 def decode_bytes_to_text(data: bytes) -> str:
-    """
-    This function *only* decodes the raw bytes into a human-readable
-    text string. This is the "conversion" you're asking about.
-    """
     try:
-        # This is the exact conversion from bytes to text
         return data.decode('utf-8')
     except Exception as e:
         print(f"Decode error: {e}")
-        return "" # Return empty string on error
+        return ""
 
-# 1. Create a new table that just has the decoded CSV text
 decoded_csv_table = gdrive_table.select(
-    decoded_text=decode_bytes_to_text(gdrive_table.data)
+    decoded_text = decode_bytes_to_text(gdrive_table.data)
 )
 
-# 2. Write this human-readable CSV content to a text file.
-# A new file will be created for each input CSV, in a folder
-# named 'received_csv_content'
-pw.io.csv.write(
-    decoded_csv_table, 
-    "received_csv_content.txt"
+@pw.udf
+def get_gemini_summary(csv_text: str) -> str:
+    if not csv_text.strip():
+        return ""
+    headers = {
+        "x-goog-api-key": gemini_api_key,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": f"Summarize this CSV data: {csv_text}"
+                    }
+                ]
+            }
+        ]
+    }
+    try:
+        response = requests.post(gemini_endpoint, json=payload, headers=headers)
+        if response.status_code == 200:
+            result = response.json()
+            # Extract from the correct nested path
+            if "candidates" in result and len(result["candidates"]) > 0:
+                candidate = result["candidates"][0]
+                if "content" in candidate and "parts" in candidate["content"]:
+                    parts = candidate["content"]["parts"]
+                    if len(parts) > 0 and "text" in parts[0]:
+                        return parts[0]["text"]
+            return "No summary generated"
+        else:
+            return f"Error: {response.status_code}"
+    except Exception as e:
+        return f"Exception: {e}"
+
+summary_table = decoded_csv_table.select(
+    summary_text = get_gemini_summary(decoded_csv_table.decoded_text)
 )
+
+pw.io.csv.write(summary_table, "gemini_summary.csv")
 
 pw.run()
