@@ -9,33 +9,47 @@
 
 ## Overview
 
-This project demonstrates a real-time streaming data pipeline that integrates **Pathway**, **Google Drive**, and **Google Gemini AI** to process CSV data and generate AI-powered summaries. The solution showcases seamless streaming capabilities, automated data decoding, and intelligent content summarization in a production-ready architecture.
+This project implements a **real-time streaming pipeline** with a robust **agentic architecture** that integrates **Pathway**, **Google Drive**, and **Google Gemini AI**. Beyond simple CSV ingestion and summarization, it employs a structured **ReAct-inspired agent loop** and **async UDF execution** to orchestrate tool calls, dynamic prompt engineering, and concurrent processing—ensuring scalable, reliable, and context-aware insights from streaming data.
 
-### Key Features
+## Key Features
 
-- **Real-time Streaming**: Continuously monitors Google Drive for new CSV files using Pathway's streaming mode
-- **Automatic Data Decoding**: Converts binary data from Google Drive into readable CSV format
-- **AI-Powered Summarization**: Leverages Google Gemini API to generate intelligent summaries of CSV content
-- **Persistent Storage**: Writes summaries to local CSV files with full streaming metadata
-- **Error Handling**: Robust exception handling for network issues, API failures, and data corruption
+- **Agentic Processing Loop**: Implements a ReAct pattern where the agent reasons, decides on tool usage (`analyze_csv_data`, `filter_data`), executes them, and synthesizes final analysis.
+- **Async UDF Executor**: Uses Pathway’s async UDF with a thread pool to offload blocking LLM calls, maintaining stream throughput.
+- **Structured Prompt Engineering**: Forces the LLM to output concrete sections (Summary, Distribution, Top Performers, Patterns, Outliers, Recommendations) without follow-ups.
+- **Streaming \& Incremental Updates**: Pathway streams new CSV files and only reprocesses changed data, preserving resource efficiency.
+- **Resilient Tool Integration**: Custom CSV-analysis tools drive precise agent actions before synthesizing combined insights.
 
 ---
 
 ## Architecture
 
-```
-Google Drive (Source)
-        ↓
-   Pathway Streaming
-        ↓
-   Decode Bytes → CSV Text
-        ↓
-   Gemini AI Summarization
-        ↓
-   CSV Output (gemini_summary.csv)
+```mermaid
+flowchart LR
+  A[Google Drive (streaming source)] --> B[Pathway Streaming Engine]
+  B --> C[decode_bytes_to_text UDF] 
+  C --> D[Agentic Loop UDF (process_with_agent)]
+  D -->|Tool Call: analyze_csv_data| E[analyze_csv_data]
+  D -->|Tool Call: filter_data| F[filter_data]
+  E & F --> D
+  D --> G[Gemini AI Summarization]
+  G --> H[pw.io.csv.write → gemini_summary.csv]
 ```
 
-The pipeline operates in streaming mode, meaning it processes new data incrementally as it arrives on Google Drive, rather than performing batch operations on static data.
+1. **Pathway Streaming Engine**
+Continuously ingests binary files from Google Drive with incremental checkpoints.
+2. **Data Decoding UDF**
+Transforms raw bytes into UTF-8 CSV text, handling errors gracefully.
+3. **Agentic Loop UDF**
+    - **Reason**: Builds a comprehensive prompt including analysis directives.
+    - **Act**: Invokes custom tools (`analyze_csv_data`, `filter_data`) based on data needs.
+    - **Observe**: Receives tool outputs as structured messages.
+    - **Synthesize**: Compiles final agent response, enforcing sections (Summary, etc.).
+4. **Async Execution**
+Runs the agentic loop in a `ThreadPoolExecutor` via Pathway’s async UDF executor to prevent blocking the streaming pipeline.
+5. **Gemini AI Summarization**
+Final combined prompt is sent to the `gemini-2.5-flash` model for natural-language analysis.
+6. **Output Storage**
+Persists each analysis into `gemini_summary.csv` with Pathway metadata (`time`, `diff`).
 
 ---
 
@@ -121,21 +135,22 @@ To find your folder ID, open the folder in Google Drive and copy the ID from the
 
 ## How It Works
 
-### 1. **Data Ingestion** (`pw.io.gdrive.read`)
-The pipeline connects to Google Drive in streaming mode, continuously monitoring for new or updated CSV files.
-
-### 2. **Data Decoding** (`decode_bytes_to_text`)
-Binary data from Google Drive is converted to readable UTF-8 text. The UDF handles encoding errors gracefully.
-
-### 3. **AI Summarization** (`get_gemini_summary`)
-Each decoded CSV text is sent to Google Gemini API with a summarization prompt. The UDF:
-- Constructs the API request with proper headers and payload
-- Sends the CSV content to `gemini-2.5-flash` model
-- Extracts the generated summary from the API response
-- Handles HTTP errors and exceptions
-
-### 4. **Output Storage** (`pw.io.csv.write`)
-Summaries are written to `gemini_summary.csv` with Pathway's streaming metadata (timestamp and diff columns).
+1. **Ingestion** (`pw.io.gdrive.read`)
+Streams CSV files from Drive as binary.
+2. **Decoding** (`decode_bytes_to_text` UDF)
+Decodes bytes→UTF-8 text, handling errors.
+3. **Summarization** (`process_with_agent` async UDF)
+     - Builds a strict prompt directing the LLM to provide:
+       - **SUMMARY**
+       - **GRADE DISTRIBUTION**
+       - **TOP PERFORMERS**
+       - **PERFORMANCE PATTERNS**
+       - **OUTLIERS**
+       - **RECOMMENDATIONS**
+    - Executes in a thread pool to avoid blocking.
+    - Enforced `timeout=3000.0` seconds to accommodate large analyses.
+4. **Output** (`pw.io.csv.write`)
+Appends each analysis to `gemini_summary.csv` with Pathway’s `time` and `diff`.
 
 ---
 
@@ -149,33 +164,25 @@ source venv/bin/activate
 python main.py
 ```
 
-The script will:
-1. Connect to your Google Drive folder
-2. Wait for CSV files (or process existing ones in streaming mode)
-3. Decode each file's content
-4. Generate summaries using Gemini AI
-5. Store summaries in `gemini_summary.csv`
-6. Continue monitoring for new files in real-time
+The pipeline will:
 
-### Output File Example
+1. Connect to your Drive folder in streaming mode.
+2. Decode and analyze each CSV with Gemini AI.
+3. Write structured insights to `gemini_summary.csv`.
+4. Continue monitoring for new files in real time.
 
-**gemini_summary.csv:**
+## Output Example
+
+```csv
+"agent_response","time","diff"
+"SUMMARY: 134 rows, 11 columns…  
+GRADE DISTRIBUTION: Quiz 1 avg 6.8, min 2, max 10, std 1.8;…  
+TOP PERFORMERS: ADM. No. 0021 (Total 295), ADM. No. 0107 (Total 292);  
+PERFORMANCE PATTERNS: Strong correlation (0.78) between Quiz 2 and End Sem;  
+OUTLIERS: ADM. No. 0450 scored 5 on Quiz 1 but 48 on End Sem;  
+RECOMMENDATIONS: Offer targeted support for low quiz scorers.","1761234567890","1"
 ```
-"summary_text","time","diff"
-"This CSV contains sales data from Q3 2025 with 150 transactions totaling $45,000 in revenue across 5 regions...","1761219939474","1"
-"Employee attendance records for October 2025 showing 95% average attendance across 50 staff members with detailed daily logs...","1761219945162","1"
-```
-
----
-
-## Requirements File
-
-The `requirements.txt` includes:
-- **pathway**: Real-time streaming data processing
-- **requests**: HTTP library for Gemini API calls
-- **python-dotenv**: Environment variable management
-- **google-auth-httplib2**: Google authentication
-- **google-api-python-client**: Google Drive API client
+(The output of my run is given in gemini_summary.csv)
 
 ---
 
@@ -188,7 +195,7 @@ The `requirements.txt` includes:
 - Python UDF support for custom transformations
 
 ### Why Gemini API?
-- State-of-the-art LLM for content understanding and summarization
+- State-of-the-art (and free) LLM for content understanding and summarization
 - Fast inference with `gemini-2.5-flash` model
 - Simple REST API integration
 - Cost-effective for batch summarization tasks
@@ -202,24 +209,10 @@ This implementation uses streaming mode because:
 
 ---
 
-## Error Handling
-
-The pipeline handles multiple failure modes:
-
-| Error Type | Handling |
-|---|---|
-| Decode Error | Returns empty string, continues processing |
-| API 401 | Indicates authentication failure (check API key) |
-| Network Timeout | Captured by exception handler |
-| No Candidates | Returns "No summary generated" |
-| Malformed CSV | Processed as-is; Gemini handles gracefully |
-
----
-
 ## Performance Considerations
 
 - **Import Time**: Pathway takes a few seconds to initialize depending on your hardware (see console output)
-- **API Latency**: Gemini summarization takes 1-3 seconds per request
+- **API Latency**: Gemini summarization takes a few seconds seconds per request
 - **Throughput**: Can process multiple CSV files concurrently if available
 - **Storage**: Output CSV grows linearly with number of summaries
 - **Memory**: Streaming mode maintains only active records in memory
@@ -228,14 +221,10 @@ The pipeline handles multiple failure modes:
 
 ## Future Enhancements
 
-- Add filtering to process only CSV files above a certain size
-- Implement custom summarization prompts for domain-specific data
-- Cache summaries to avoid duplicate processing
-- Add support for other output formats (JSON, Parquet)
-- Integrate with cloud storage (GCS) for scalability
-- Implement retry logic with exponential backoff for API failures
-- Add logging framework for better debugging
-- Support for batch processing with configurable batch size
+- Extend agent with additional tools (e.g., outlier detection).
+- Introduce multi-agent coordination for complex pipelines.
+- Integrate caching of tool outputs to optimize repeated analyses.
+- Add detailed metrics collection within the agent loop for observability.
 
 ---
 
