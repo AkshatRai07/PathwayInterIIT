@@ -39,28 +39,103 @@ def _get_string_content(content: Any) -> str:
 @tool
 def analyze_csv_data(csv_text: str, query: str) -> str:
     """
-    Analyzes CSV data and extracts key statistics based on the query.
-    
+    Analyzes CSV data and extracts key statistics or insights based on the query.
+
     Args:
-        csv_text: The CSV data as a string
-        query: The analysis query (e.g., "sum all values", "find trends")
-    
+        csv_text: The CSV data as a string.
+        query: The analysis query (e.g., "summary", "describe columns", "find trends").
+
     Returns:
-        Analysis results as a string
+        A text summary of the analysis.
     """
-    if not csv_text:
-        return "Error: CSV data is empty."
-        
-    lines = csv_text.strip().split('\n')
-    if not lines:
+    import io, csv, statistics
+
+    if not csv_text.strip():
         return "Error: CSV data is empty."
 
-    headers_line = lines[0]
-    headers = headers_line.split(',')
-    
-    data_rows = len(lines) - 1
-    
-    return f"CSV Analysis: Found {data_rows} data rows with {len(headers)} columns. Headers: {', '.join(headers)}"
+    f = io.StringIO(csv_text)
+    reader = csv.DictReader(f)
+    rows = list(reader)
+    headers = reader.fieldnames or []
+
+    if not rows or not headers:
+        return "Error: Invalid or empty CSV data."
+
+    numeric_columns = {}
+    for h in headers:
+        col_values = []
+        for row in rows:
+            val = row.get(h, "").strip()
+            try:
+                col_values.append(float(val))
+            except ValueError:
+                continue
+        if len(col_values) > 0:
+            numeric_columns[h] = col_values
+
+    query_lower = query.lower().strip()
+
+    if "summary" in query_lower or "overview" in query_lower or query_lower == "":
+        summary = [
+            f"CSV contains {len(rows)} rows and {len(headers)} columns.",
+            f"Columns: {', '.join(headers)}.",
+            "",
+            "Numeric column statistics:"
+        ]
+        for h, vals in numeric_columns.items():
+            summary.append(
+                f"- {h}: mean={statistics.mean(vals):.2f}, "
+                f"min={min(vals):.2f}, max={max(vals):.2f}, "
+                f"std={statistics.pstdev(vals):.2f}"
+            )
+        return "\n".join(summary)
+
+    for h in headers:
+        if h.lower() in query_lower:
+            vals = numeric_columns.get(h)
+            if vals:
+                return (
+                    f"Column '{h}' has {len(vals)} numeric values.\n"
+                    f"Mean: {statistics.mean(vals):.2f}\n"
+                    f"Min: {min(vals):.2f}\n"
+                    f"Max: {max(vals):.2f}\n"
+                    f"Std Dev: {statistics.pstdev(vals):.2f}"
+                )
+            else:
+                freq = {}
+                for row in rows:
+                    val = row.get(h, "").strip()
+                    if val:
+                        freq[val] = freq.get(val, 0) + 1
+                top_vals = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:5]
+                return (
+                    f"Column '{h}' appears to be categorical.\n"
+                    f"Top values:\n" +
+                    "\n".join([f"- {v}: {c} occurrences" for v, c in top_vals])
+                )
+
+    if "correlation" in query_lower or "trend" in query_lower:
+        import numpy as np
+        corrs = []
+        cols = list(numeric_columns.keys())
+        for i in range(len(cols)):
+            for j in range(i + 1, len(cols)):
+                a, b = numeric_columns[cols[i]], numeric_columns[cols[j]]
+                n = min(len(a), len(b))
+                if n < 2:
+                    continue
+                corr = np.corrcoef(a[:n], b[:n])[0, 1]
+                corrs.append((cols[i], cols[j], corr))
+        if not corrs:
+            return "No numeric correlations found."
+        corrs.sort(key=lambda x: abs(x[2]), reverse=True)
+        top_corrs = "\n".join([f"- {a} ↔ {b}: corr={c:.2f}" for a, b, c in corrs[:5]])
+        return f"Top correlations:\n{top_corrs}"
+
+    return (
+        f"Sorry, I couldn't interpret the query '{query}'. "
+        f"Try asking for 'summary', 'describe <column>', or 'correlation'."
+    )
 
 @tool
 def filter_data(csv_text: str, column_name: str, operator: str, value: str) -> str:
@@ -264,6 +339,9 @@ async def process_with_agent(csv_text: str) -> str:
     user_query = f"""You are a data analyst. Analyze the following CSV data and provide CONCRETE insights. 
 
 DO NOT ask for clarification. DO NOT ask what kind of analysis. Just analyze and report.
+
+Use the available tools to analyze this CSV data.
+First, call analyze_csv_data to get a summary, then use filter_data if needed, then carry out further analysis if you wish.
 
 CSV Data:
 {csv_text}
